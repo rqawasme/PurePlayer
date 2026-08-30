@@ -1,0 +1,42 @@
+name: pureplayer
+description: "PurePlayer — a simple, ad-free local MP3 player for Android."
+publish_to: 'none'
+version: 0.1.0+1
+
+environment:
+  sdk: ^3.13.1
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # State management. Riverpod 3.x — note that StateProvider and friends now
+  # live in package:flutter_riverpod/legacy.dart; this app uses Notifier /
+  # AsyncNotifier throughout and needs no code generation.
+  flutter_riverpod: ^3.4.2
+
+  # Playback + background service with lock-screen and notification controls.
+  just_audio: ^0.10.6
+  audio_service: ^0.18.19
+  audio_session: ^0.2.4
+
+  # Local persistence for playlists and resume state.
+  sqflite: ^2.4.3
+  path: ^1.9.1
+  path_provider: ^2.1.6
+
+  # Stream combination for the seek bar. Already present transitively via
+  # just_audio and audio_service; pinned here to keep a single resolved version.
+  rxdart: ^0.28.0
+
+  cupertino_icons: ^1.0.9
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+  # Runs the sqflite schema against desktop SQLite so the DAO is unit-testable.
+  sqflite_common_ffi: ^2.4.2+1
+
+flutter:
+  uses-material-design: true

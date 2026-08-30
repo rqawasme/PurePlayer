@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Matches AppTheme._background in lib/theme/app_theme.dart, so the
+         native window behind Flutter is the same near-white aqua the app
+         paints. -->
+    <color name="pure_background">#FFF6FDFE</color>
+</resources>
