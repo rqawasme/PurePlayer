@@ -1,5 +1,6 @@
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:pureplayer/models/library_permission.dart';
 import 'package:pureplayer/models/track.dart';
 import 'package:pureplayer/services/media_store_service.dart';
 
@@ -97,6 +98,50 @@ void main() {
   test('reports the device API level', () async {
     stub((_) async => 34);
     expect(await MediaStoreService().sdkInt(), 34);
+  });
+
+  group('permissions', () {
+    test('decodes each status the platform can return', () async {
+      for (final (reply, expected) in [
+        ('granted', LibraryPermission.granted),
+        ('denied', LibraryPermission.denied),
+        ('permanentlyDenied', LibraryPermission.permanentlyDenied),
+      ]) {
+        stub((_) async => reply);
+        expect(await MediaStoreService().permissionStatus(), expected);
+      }
+    });
+
+    test('treats an unrecognised or missing status as denied', () async {
+      // Denied is the recoverable outcome — the launch screen offers to ask
+      // again, where permanentlyDenied would strand the user in settings.
+      stub((_) async => null);
+      expect(
+        await MediaStoreService().permissionStatus(),
+        LibraryPermission.denied,
+      );
+
+      stub((_) async => 'something-new');
+      expect(
+        await MediaStoreService().permissionStatus(),
+        LibraryPermission.denied,
+      );
+    });
+
+    test('requestPermission returns the answer to the system dialog', () async {
+      stub((_) async => 'granted');
+      expect(
+        await MediaStoreService().requestPermission(),
+        LibraryPermission.granted,
+      );
+      expect(calls.single.method, 'requestPermission');
+    });
+
+    test('openAppSettings reaches the platform', () async {
+      stub((_) async => true);
+      await MediaStoreService().openAppSettings();
+      expect(calls.single.method, 'openAppSettings');
+    });
   });
 
   group('artwork', () {

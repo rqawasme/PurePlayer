@@ -1,0 +1,77 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  # Matches the SDK the project is developed against; see README.
+  FLUTTER_VERSION: 3.47.1
+  # Matches sourceCompatibility / jvmTarget in android/app/build.gradle.kts.
+  JAVA_VERSION: "17"
+
+jobs:
+  analyze-and-test:
+    name: Analyze and test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      - run: flutter pub get
+
+      - name: Verify formatting
+        run: dart format --set-exit-if-changed lib test
+
+      - name: Analyze
+        run: flutter analyze
+
+      - name: Test
+        run: flutter test
+
+  build-apk:
+    name: Build debug APK
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      # Pinned rather than left to whatever the runner image ships, so the
+      # build matches flutter.compileSdkVersion (36) exactly. A dependency that
+      # demands a higher compileSdk then fails here loudly instead of silently
+      # auto-installing a mismatched platform on a contributor's machine.
+      - name: Install Android SDK 36
+        uses: android-actions/setup-android@v3
+        with:
+          packages: platforms;android-36 build-tools;36.0.0
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - run: flutter pub get
+
+      - name: Build debug APK
+        run: flutter build apk --debug
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: pureplayer-debug-apk
+          path: build/app/outputs/flutter-apk/app-debug.apk
+          if-no-files-found: error

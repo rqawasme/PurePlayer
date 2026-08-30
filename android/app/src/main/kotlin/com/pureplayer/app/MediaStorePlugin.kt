@@ -1,7 +1,12 @@
 package com.pureplayer.app
 
+import android.Manifest
+import android.app.Activity
 import android.content.ContentUris
 import android.content.Context
+import android.content.Intent
+import android.content.SharedPreferences
+import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
@@ -9,6 +14,7 @@ import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.provider.MediaStore
+import android.provider.Settings
 import android.util.Size
 import io.flutter.plugin.common.BinaryMessenger
 import io.flutter.plugin.common.MethodCall
@@ -17,28 +23,50 @@ import java.io.ByteArrayOutputStream
 import java.util.concurrent.Executors
 
 /**
- * Reads the device's audio library straight from `MediaStore`.
+ * Reads the device's audio library straight from `MediaStore`, and owns the
+ * runtime permission that gates it.
  *
- * This is deliberately hand-rolled instead of pulling in `on_audio_query`: that
- * package's Android module has been unmaintained since 2023 and does not build
- * against the Android Gradle Plugin this project uses.
+ * Both halves are deliberately hand-rolled rather than taken from packages:
+ * `on_audio_query`'s Android module has been unmaintained since 2023 and does
+ * not build against this project's Android Gradle Plugin, and
+ * `permission_handler_android` 14 forces `compileSdk = 37` on the whole app for
+ * what amounts to three calls. Everything used here is framework API available
+ * since API 23, well below this app's `minSdk` of 24, so no dependency can pin
+ * an SDK level again.
  *
- * All content-resolver work runs on a background executor; results are posted
- * back on the main looper because Flutter's [MethodChannel.Result] is not
- * thread-safe.
+ * Content-resolver work runs on a background executor; results are posted back
+ * on the main looper because Flutter's [MethodChannel.Result] is not
+ * thread-safe. The permission calls stay on the main thread — they touch the
+ * [Activity].
  */
-class MediaStorePlugin(private val context: Context) : MethodChannel.MethodCallHandler {
+class MediaStorePlugin(private val activity: Activity) : MethodChannel.MethodCallHandler {
 
+    private val context: Context get() = activity.applicationContext
     private val executor = Executors.newSingleThreadExecutor()
     private val mainHandler = Handler(Looper.getMainLooper())
+
+    /** Held between [requestPermission] and the system dialog's callback. */
+    private var pendingPermissionResult: MethodChannel.Result? = null
+
+    private val preferences: SharedPreferences
+        get() = context.getSharedPreferences(PREFERENCES, Context.MODE_PRIVATE)
 
     fun register(messenger: BinaryMessenger) {
         MethodChannel(messenger, CHANNEL).setMethodCallHandler(this)
     }
 
+    /** Releases the worker thread; called when the hosting activity is destroyed. */
+    fun destroy() {
+        pendingPermissionResult = null
+        executor.shutdown()
+    }
+
     override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
         when (call.method) {
             "sdkInt" -> result.success(Build.VERSION.SDK_INT)
+            "permissionStatus" -> result.success(permissionStatus())
+            "requestPermission" -> requestPermission(result)
+            "openAppSettings" -> result.success(openAppSettings())
             "queryTracks" -> runAsync(result) { queryTracks() }
             "queryArtwork" -> {
                 val songId = (call.argument<Number>("songId"))?.toLong()
@@ -67,6 +95,75 @@ class MediaStorePlugin(private val context: Context) : MethodChannel.MethodCallH
             }
         }
     }
+
+    // ------------------------------------------------------------ permission
+
+    /**
+     * Android 13+ replaced blanket storage access with a scoped audio
+     * permission; older releases only understand the legacy one.
+     */
+    private val audioPermission: String
+        get() = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            Manifest.permission.READ_MEDIA_AUDIO
+        } else {
+            Manifest.permission.READ_EXTERNAL_STORAGE
+        }
+
+    private fun isGranted(): Boolean =
+        context.checkSelfPermission(audioPermission) == PackageManager.PERMISSION_GRANTED
+
+    /**
+     * One of `granted`, `denied` or `permanentlyDenied`.
+     *
+     * `shouldShowRequestPermissionRationale` also returns false *before* the
+     * first ever request, so it cannot identify a permanent denial on its own —
+     * hence the persisted "we have asked at least once" flag.
+     */
+    private fun permissionStatus(): String {
+        if (isGranted()) return GRANTED
+        val hasAsked = preferences.getBoolean(KEY_HAS_REQUESTED, false)
+        val canAskAgain = activity.shouldShowRequestPermissionRationale(audioPermission)
+        return if (hasAsked && !canAskAgain) PERMANENTLY_DENIED else DENIED
+    }
+
+    private fun requestPermission(result: MethodChannel.Result) {
+        if (isGranted()) {
+            result.success(GRANTED)
+            return
+        }
+        if (pendingPermissionResult != null) {
+            result.error("permission_pending", "A permission request is already in progress", null)
+            return
+        }
+
+        pendingPermissionResult = result
+        preferences.edit().putBoolean(KEY_HAS_REQUESTED, true).apply()
+        activity.requestPermissions(arrayOf(audioPermission), PERMISSION_REQUEST_CODE)
+    }
+
+    /** Called by `MainActivity` once the system dialog has been answered. */
+    fun onRequestPermissionsResult(requestCode: Int): Boolean {
+        if (requestCode != PERMISSION_REQUEST_CODE) return false
+        val result = pendingPermissionResult ?: return true
+        pendingPermissionResult = null
+        result.success(permissionStatus())
+        return true
+    }
+
+    /** Opens this app's system settings page, for a permanently denied grant. */
+    private fun openAppSettings(): Boolean = try {
+        activity.startActivity(
+            Intent(
+                Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                Uri.fromParts("package", activity.packageName, null),
+            ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+        )
+        true
+    } catch (_: Throwable) {
+        false
+    }
+
+    // ---------------------------------------------------------------- library
 
     private fun queryTracks(): List<Map<String, Any?>> {
         val collection = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -174,6 +271,14 @@ class MediaStorePlugin(private val context: Context) : MethodChannel.MethodCallH
         const val CHANNEL = "com.pureplayer.app/media_store"
         const val DEFAULT_ART_SIZE = 256
         const val JPEG_QUALITY = 85
+
+        const val PREFERENCES = "pureplayer_permissions"
+        const val KEY_HAS_REQUESTED = "has_requested_audio_permission"
+        const val PERMISSION_REQUEST_CODE = 4711
+
+        const val GRANTED = "granted"
+        const val DENIED = "denied"
+        const val PERMANENTLY_DENIED = "permanentlyDenied"
         val LEGACY_ALBUM_ART: Uri = Uri.parse("content://media/external/audio/albumart")
     }
 }

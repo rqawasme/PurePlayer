@@ -25,9 +25,6 @@ dependencies:
   path: ^1.9.1
   path_provider: ^2.1.6
 
-  # Android 13+ READ_MEDIA_AUDIO handling.
-  permission_handler: ^13.0.1
-
   # Stream combination for the seek bar. Already present transitively via
   # just_audio and audio_service; pinned here to keep a single resolved version.
   rxdart: ^0.28.0

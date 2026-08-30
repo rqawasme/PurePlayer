@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
+import '../models/library_permission.dart';
 import '../models/track.dart';
 
 /// Dart side of the app's own `MediaStore` platform channel.
@@ -29,8 +30,25 @@ class MediaStoreService {
   final LinkedHashMap<int, Uint8List?> _artCache = LinkedHashMap();
   Directory? _artDirectory;
 
-  /// The device's API level, used to pick the right runtime permission.
+  /// The device's API level. Informational only — which permission to ask for
+  /// is decided on the Android side.
   Future<int> sdkInt() async => await _channel.invokeMethod<int>('sdkInt') ?? 0;
+
+  /// Current audio-permission state, without prompting.
+  Future<LibraryPermission> permissionStatus() async =>
+      LibraryPermission.fromPlatform(
+        await _channel.invokeMethod<String>('permissionStatus'),
+      );
+
+  /// Shows the system permission dialog and resolves once it is answered.
+  Future<LibraryPermission> requestPermission() async =>
+      LibraryPermission.fromPlatform(
+        await _channel.invokeMethod<String>('requestPermission'),
+      );
+
+  /// Opens this app's page in system settings, for a permanently denied grant.
+  Future<void> openAppSettings() =>
+      _channel.invokeMethod<bool>('openAppSettings');
 
   Future<List<Track>> queryTracks() async {
     final rows =

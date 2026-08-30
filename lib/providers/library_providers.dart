@@ -2,12 +2,16 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:permission_handler/permission_handler.dart';
 
+import '../models/library_permission.dart';
 import '../models/sort_option.dart';
 import '../models/track.dart';
 import '../services/database.dart';
 import '../services/media_store_service.dart';
+
+// Re-exported so screens can switch on the permission state without reaching
+// past the providers into models/.
+export '../models/library_permission.dart';
 
 /// Overridden in `main()` so the app and the audio handler share one instance.
 final mediaStoreProvider = Provider<MediaStoreService>(
@@ -17,18 +21,6 @@ final mediaStoreProvider = Provider<MediaStoreService>(
 /// Overridden in `main()` for the same reason.
 final databaseProvider = Provider<AppDatabase>((ref) => AppDatabase());
 
-/// First Android API level that replaced blanket storage access with the
-/// scoped `READ_MEDIA_AUDIO` permission.
-const _androidTiramisu = 33;
-
-enum LibraryPermission {
-  granted,
-  denied,
-
-  /// The user selected "don't ask again", so only app settings can fix it.
-  permanentlyDenied,
-}
-
 final permissionProvider =
     AsyncNotifierProvider<PermissionNotifier, LibraryPermission>(
       PermissionNotifier.new,
@@ -36,38 +28,25 @@ final permissionProvider =
 
 class PermissionNotifier extends AsyncNotifier<LibraryPermission> {
   @override
-  Future<LibraryPermission> build() async =>
-      _map(await (await _target()).status);
+  Future<LibraryPermission> build() =>
+      ref.read(mediaStoreProvider).permissionStatus();
 
-  /// Android 13+ wants `READ_MEDIA_AUDIO`; older releases only understand the
-  /// legacy storage permission.
-  Future<Permission> _target() async {
-    final sdkInt = await ref.read(mediaStoreProvider).sdkInt();
-    return sdkInt >= _androidTiramisu ? Permission.audio : Permission.storage;
-  }
-
-  static LibraryPermission _map(PermissionStatus status) {
-    if (status.isGranted || status.isLimited) return LibraryPermission.granted;
-    if (status.isPermanentlyDenied) return LibraryPermission.permanentlyDenied;
-    return LibraryPermission.denied;
-  }
-
+  /// Shows the system dialog. No-op if access has already been granted.
   Future<void> request() async {
     state = const AsyncValue.loading();
-    state = await AsyncValue.guard(() async {
-      final permission = await _target();
-      return _map(await permission.request());
-    });
+    state = await AsyncValue.guard(
+      () => ref.read(mediaStoreProvider).requestPermission(),
+    );
   }
 
   /// Re-reads the status, for when the user returns from app settings.
   Future<void> recheck() async {
     state = await AsyncValue.guard(
-      () async => _map(await (await _target()).status),
+      () => ref.read(mediaStoreProvider).permissionStatus(),
     );
   }
 
-  Future<void> openSettings() => openAppSettings();
+  Future<void> openSettings() => ref.read(mediaStoreProvider).openAppSettings();
 }
 
 /// Every MP3 the device has indexed, newest scan wins.

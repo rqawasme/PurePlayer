@@ -77,6 +77,19 @@ android/app/src/main/kotlin/com/pureplayer/app/
   MainActivity.kt       extends AudioServiceActivity
 ```
 
+### Why no `permission_handler`
+
+`permission_handler_android` 14 declares `compileSdk = 37`. Since AGP requires the
+app's `compileSdk` to be at least as high as every dependency's, that one package
+forced the whole project off Flutter's pinned 36 and onto an SDK platform that does
+not resolve cleanly (`android-37.0` gets installed; AGP looks for `android-37`).
+Every other Android module here sits at 36 or below.
+
+The permission flow it provided — check status, request one permission, open app
+settings — now lives in `MediaStorePlugin.kt` alongside the MediaStore query.
+It uses only framework APIs available since API 23, well under this app's `minSdk`
+of 24, so no dependency can pin the project's SDK level again.
+
 ### Why a hand-rolled MediaStore channel
 
 The obvious choice, `on_audio_query`, has been unmaintained since 2023: its
@@ -93,7 +106,10 @@ flutter analyze
 flutter test
 ```
 
-39 tests cover the search/sort logic, the sqflite DAO (run against real SQLite
+43 tests cover the search/sort logic, the sqflite DAO (run against real SQLite
 through `sqflite_common_ffi`, including playlist reordering and cascade
-deletes), the `MediaStore` channel mapping and artwork caching, and `TrackCard`
-rendering.
+deletes), the `MediaStore` channel mapping, permission-status decoding, artwork
+caching, and `TrackCard` rendering.
+
+CI (`.github/workflows/ci.yml`) runs those on every pull request and also builds a
+debug APK against Android SDK 36, uploading it as a build artifact.
