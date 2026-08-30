@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -23,6 +25,9 @@ class _LaunchScreenState extends ConsumerState<LaunchScreen>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    // Shuffle and repeat are restored regardless of permissions or of whether
+    // there is a queue to resume, so the buttons read right from the start.
+    unawaited(ref.read(playbackControllerProvider).restorePlaybackMode());
   }
 
   @override

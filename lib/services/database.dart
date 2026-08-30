@@ -22,6 +22,9 @@ class AppDatabase {
   /// Key under which the resume queue/position is stored in `app_state`.
   static const resumeStateKey = 'resume';
 
+  /// Key under which the shuffle/repeat choice is stored in `app_state`.
+  static const playbackModeStateKey = 'playback_mode';
+
   /// Injected by tests so the schema can be exercised against desktop SQLite.
   final DatabaseFactory? factoryOverride;
   final String? pathOverride;

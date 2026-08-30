@@ -34,9 +34,16 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> {
     super.dispose();
   }
 
+  /// Tapping a row keeps whatever shuffle/repeat setting is in force — the
+  /// user picked a starting track, not an order.
   Future<void> _play(List<Track> tracks, int index) => ref
       .read(playbackControllerProvider)
       .playAll(tracks, source: const LibrarySource(), index: index);
+
+  /// Plays everything currently listed in a fresh random order.
+  Future<void> _shuffleAll(List<Track> tracks) => ref
+      .read(playbackControllerProvider)
+      .shufflePlay(tracks, source: const LibrarySource());
 
   @override
   Widget build(BuildContext context) {
@@ -51,6 +58,11 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> {
       appBar: AppBar(
         title: const Text('Library'),
         actions: [
+          IconButton(
+            tooltip: 'Shuffle all',
+            icon: const Icon(Icons.shuffle_rounded),
+            onPressed: visible.isEmpty ? null : () => _shuffleAll(visible),
+          ),
           IconButton(
             tooltip: 'Sort (${sort.field.label})',
             icon: const Icon(Icons.sort_rounded),

@@ -12,10 +12,15 @@ permission, so the OS enforces that rather than us merely promising it.
   or duration
 - Playback screen with play/pause, next/previous, and a scrub bar showing
   position and duration
+- Shuffle and repeat (off / all / one), toggled from the player screen and
+  reflected in the media session
+- Play a playlist in its listed order or shuffled, and shuffle the whole
+  library from the library screen
 - Background playback with notification and lock-screen controls
 - Create, rename and delete playlists; add and remove tracks
 - Drag-and-drop reordering within a playlist
-- Playlists, sort choice, and the last queue + position persist locally
+- Playlists, sort choice, shuffle/repeat, and the last queue + position
+  persist locally
 
 ## Requirements
 
@@ -65,13 +70,14 @@ going stale.
 
 ```
 lib/
-  models/      Track, Playlist, SortOption, PlaybackSource + the pure
-               search/sort functions
+  models/      Track, Playlist, SortOption, PlaybackSource, PlaybackMode +
+               the pure search/sort functions
   services/    MediaStoreService (platform channel), AppDatabase (sqflite),
                PurePlayerAudioHandler (just_audio + audio_service)
   providers/   Riverpod 3 providers: library, playlists, playback
   screens/     launch, home, library, playlist list/detail, player
-  widgets/     TrackCard, AlbumArt, MiniPlayer, SeekBar, sheets
+  widgets/     TrackCard, AlbumArt, MiniPlayer, SeekBar, shuffle/repeat
+               buttons, sheets
 android/app/src/main/kotlin/com/pureplayer/app/
   MediaStorePlugin.kt   MediaStore query + album-art thumbnails
   MainActivity.kt       extends AudioServiceActivity
@@ -106,10 +112,11 @@ flutter analyze
 flutter test
 ```
 
-43 tests cover the search/sort logic, the sqflite DAO (run against real SQLite
-through `sqflite_common_ffi`, including playlist reordering and cascade
-deletes), the `MediaStore` channel mapping, permission-status decoding, artwork
-caching, and `TrackCard` rendering.
+54 tests cover the search/sort logic, the shuffle/repeat model and its
+persistence format, the sqflite DAO (run against real SQLite through
+`sqflite_common_ffi`, including playlist reordering and cascade deletes), the
+`MediaStore` channel mapping, permission-status decoding, artwork caching, and
+the `TrackCard` and shuffle/repeat button rendering.
 
 CI (`.github/workflows/ci.yml`) runs those on every pull request and also builds a
 debug APK against Android SDK 36, uploading it as a build artifact.
