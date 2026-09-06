@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../providers/playback_providers.dart';
 import '../widgets/album_art.dart';
+import '../widgets/playback_mode_buttons.dart';
 import '../widgets/seek_bar.dart';
 
 /// Full-screen now-playing view: art, metadata, scrub bar and transport.
@@ -73,15 +74,15 @@ class PlayerScreen extends ConsumerWidget {
                     ),
                     const SizedBox(height: 12),
                     Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
+                      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                       children: [
+                        const ShuffleButton(iconSize: 28),
                         IconButton(
                           iconSize: 44,
                           tooltip: 'Previous',
                           icon: const Icon(Icons.skip_previous_rounded),
                           onPressed: handler.skipToPrevious,
                         ),
-                        const SizedBox(width: 12),
                         FilledButton(
                           onPressed: () => ref
                               .read(playbackControllerProvider)
@@ -97,13 +98,13 @@ class PlayerScreen extends ConsumerWidget {
                             size: 40,
                           ),
                         ),
-                        const SizedBox(width: 12),
                         IconButton(
                           iconSize: 44,
                           tooltip: 'Next',
                           icon: const Icon(Icons.skip_next_rounded),
                           onPressed: handler.skipToNext,
                         ),
+                        const RepeatButton(iconSize: 28),
                       ],
                     ),
                     const Spacer(),

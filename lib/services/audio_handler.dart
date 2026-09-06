@@ -4,6 +4,7 @@ import 'package:audio_service/audio_service.dart';
 import 'package:audio_session/audio_session.dart';
 import 'package:just_audio/just_audio.dart';
 
+import '../models/playback_mode.dart';
 import '../models/player_source.dart';
 import '../models/track.dart';
 import 'media_store_service.dart';
@@ -31,6 +32,18 @@ class PurePlayerAudioHandler extends BaseAudioHandler
   /// Where the current queue came from, or `null` if nothing is loaded.
   PlaybackSource? get source => _source;
 
+  /// Shuffle and repeat as the player currently has them. The player is the
+  /// single source of truth for both, so a change made from the notification
+  /// or the lock screen reads back the same as one made in the app.
+  PlaybackMode get mode => PlaybackMode(
+    shuffle: _player.shuffleModeEnabled,
+    repeat: switch (_player.loopMode) {
+      LoopMode.off => RepeatSetting.off,
+      LoopMode.all => RepeatSetting.all,
+      LoopMode.one => RepeatSetting.one,
+    },
+  );
+
   Track? get currentTrack {
     final index = _player.currentIndex;
     if (index == null || index < 0 || index >= _tracks.length) return null;
@@ -42,7 +55,7 @@ class PurePlayerAudioHandler extends BaseAudioHandler
     await session.configure(const AudioSessionConfiguration.music());
 
     _player.playbackEventStream
-        .map(_toPlaybackState)
+        .map((_) => _toPlaybackState())
         .listen(playbackState.add, onError: (Object _) {});
 
     // just_audio 0.10 moved player errors off playbackEventStream. Swallowing
@@ -104,6 +117,11 @@ class PurePlayerAudioHandler extends BaseAudioHandler
       initialPosition: initialPosition,
     );
 
+    // A new queue arrives in its natural order, so the shuffle order has to be
+    // re-rolled — otherwise shuffle would stay on but replay the old sequence.
+    // The re-roll keeps the cued track first, so playback starts where asked.
+    if (_player.shuffleModeEnabled) await _player.shuffle();
+
     if (autoPlay) await _player.play();
   }
 
@@ -151,6 +169,48 @@ class PurePlayerAudioHandler extends BaseAudioHandler
     }
   }
 
+  /// Turns shuffle on or off for the current queue.
+  ///
+  /// Switching it on re-rolls the order rather than reusing the last one, so
+  /// two shuffles of the same playlist do not play the same sequence.
+  Future<void> setShuffleEnabled(bool enabled) async {
+    if (enabled && _tracks.isNotEmpty) await _player.shuffle();
+    await _player.setShuffleModeEnabled(enabled);
+    playbackState.add(_toPlaybackState());
+  }
+
+  Future<void> setRepeat(RepeatSetting repeat) async {
+    await _player.setLoopMode(switch (repeat) {
+      RepeatSetting.off => LoopMode.off,
+      RepeatSetting.all => LoopMode.all,
+      RepeatSetting.one => LoopMode.one,
+    });
+    playbackState.add(_toPlaybackState());
+  }
+
+  Future<void> setPlaybackMode(PlaybackMode mode) async {
+    await setRepeat(mode.repeat);
+    await setShuffleEnabled(mode.shuffle);
+  }
+
+  /// Runs a skip that would otherwise be swallowed by [LoopMode.one].
+  ///
+  /// just_audio treats the current item as its own next and previous while
+  /// repeating one track, which is right when a track ends on its own but
+  /// wrong for a deliberate tap on next or previous. Borrowing [LoopMode.all]
+  /// for the jump moves off the track and still wraps at the ends.
+  Future<void> _skipPastRepeatOne(Future<void> Function() skip) async {
+    final loopMode = _player.loopMode;
+    if (loopMode != LoopMode.one) return skip();
+
+    await _player.setLoopMode(LoopMode.all);
+    try {
+      await skip();
+    } finally {
+      await _player.setLoopMode(loopMode);
+    }
+  }
+
   MediaItem _toMediaItem(Track track) => MediaItem(
     id: track.path,
     title: track.title,
@@ -182,7 +242,7 @@ class PurePlayerAudioHandler extends BaseAudioHandler
     if (_player.currentIndex == index) mediaItem.add(updated);
   }
 
-  PlaybackState _toPlaybackState(PlaybackEvent event) => PlaybackState(
+  PlaybackState _toPlaybackState() => PlaybackState(
     controls: [
       MediaControl.skipToPrevious,
       if (_player.playing) MediaControl.pause else MediaControl.play,
@@ -193,6 +253,8 @@ class PurePlayerAudioHandler extends BaseAudioHandler
       MediaAction.seek,
       MediaAction.seekForward,
       MediaAction.seekBackward,
+      MediaAction.setShuffleMode,
+      MediaAction.setRepeatMode,
     },
     androidCompactActionIndices: const [0, 1, 2],
     processingState: switch (_player.processingState) {
@@ -206,7 +268,15 @@ class PurePlayerAudioHandler extends BaseAudioHandler
     updatePosition: _player.position,
     bufferedPosition: _player.bufferedPosition,
     speed: _player.speed,
-    queueIndex: event.currentIndex,
+    queueIndex: _player.currentIndex,
+    repeatMode: switch (_player.loopMode) {
+      LoopMode.off => AudioServiceRepeatMode.none,
+      LoopMode.all => AudioServiceRepeatMode.all,
+      LoopMode.one => AudioServiceRepeatMode.one,
+    },
+    shuffleMode: _player.shuffleModeEnabled
+        ? AudioServiceShuffleMode.all
+        : AudioServiceShuffleMode.none,
   );
 
   // ------------------------------------------------- audio_service overrides
@@ -221,10 +291,23 @@ class PurePlayerAudioHandler extends BaseAudioHandler
   Future<void> seek(Duration position) => _player.seek(position);
 
   @override
-  Future<void> skipToNext() => _player.seekToNext();
+  Future<void> skipToNext() => _skipPastRepeatOne(_player.seekToNext);
 
   @override
-  Future<void> skipToPrevious() => _player.seekToPrevious();
+  Future<void> skipToPrevious() => _skipPastRepeatOne(_player.seekToPrevious);
+
+  @override
+  Future<void> setRepeatMode(AudioServiceRepeatMode repeatMode) =>
+      setRepeat(switch (repeatMode) {
+        AudioServiceRepeatMode.none => RepeatSetting.off,
+        AudioServiceRepeatMode.one => RepeatSetting.one,
+        AudioServiceRepeatMode.all ||
+        AudioServiceRepeatMode.group => RepeatSetting.all,
+      });
+
+  @override
+  Future<void> setShuffleMode(AudioServiceShuffleMode shuffleMode) =>
+      setShuffleEnabled(shuffleMode != AudioServiceShuffleMode.none);
 
   @override
   Future<void> skipToQueueItem(int index) async {

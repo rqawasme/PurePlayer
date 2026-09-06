@@ -1,16 +1,22 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math';
 
 import 'package:audio_service/audio_service.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:rxdart/rxdart.dart';
 
+import '../models/playback_mode.dart';
 import '../models/player_source.dart';
 import '../models/track.dart';
 import '../services/audio_handler.dart';
 import '../services/database.dart';
 import 'library_providers.dart';
+
+// Re-exported so screens can render the shuffle/repeat controls without
+// reaching past the providers into models/.
+export '../models/playback_mode.dart';
 
 /// Always overridden in `main()`; the handler must be created before the
 /// widget tree so audio_service can bind it to the platform media session.
@@ -32,6 +38,24 @@ final currentMediaItemProvider = StreamProvider<MediaItem?>(
 final queueProvider = StreamProvider<List<MediaItem>>(
   (ref) => ref.watch(audioHandlerProvider).queue,
 );
+
+/// The live shuffle/repeat setting.
+///
+/// Derived from the media session state rather than held separately, so a
+/// change made from the notification or lock screen shows up in the app too.
+final playbackModeProvider = Provider<PlaybackMode>((ref) {
+  final state = ref.watch(playbackStateProvider).value;
+  if (state == null) return const PlaybackMode();
+  return PlaybackMode(
+    shuffle: state.shuffleMode != AudioServiceShuffleMode.none,
+    repeat: switch (state.repeatMode) {
+      AudioServiceRepeatMode.none => RepeatSetting.off,
+      AudioServiceRepeatMode.one => RepeatSetting.one,
+      AudioServiceRepeatMode.all ||
+      AudioServiceRepeatMode.group => RepeatSetting.all,
+    },
+  );
+});
 
 /// The currently playing track, or `null` when the queue is empty.
 final currentTrackProvider = Provider<Track?>((ref) {
@@ -94,6 +118,10 @@ class PlaybackController {
   final Ref _ref;
   Timer? _saveTimer;
 
+  /// Only picks the track a shuffled queue starts on; nothing here needs a
+  /// seeded or cryptographic source.
+  final Random _random = Random();
+
   PurePlayerAudioHandler get _handler => _ref.read(audioHandlerProvider);
   AppDatabase get _db => _ref.read(databaseProvider);
 
@@ -107,6 +135,63 @@ class PlaybackController {
     await _handler.loadQueue(tracks, source: source, initialIndex: index);
     _startAutosave();
     unawaited(saveResumeState());
+  }
+
+  /// Plays [tracks] in the order they are listed, turning shuffle off.
+  ///
+  /// This is the "play in order" entry point: the user asked for this
+  /// sequence, so a shuffle left on from last time must not reorder it.
+  Future<void> playInOrder(
+    List<Track> tracks, {
+    required PlaybackSource source,
+    int index = 0,
+  }) async {
+    if (tracks.isEmpty) return;
+    await setPlaybackMode(_handler.mode.copyWith(shuffle: false));
+    await playAll(tracks, source: source, index: index);
+  }
+
+  /// Plays [tracks] in a fresh random order, turning shuffle on.
+  ///
+  /// Starts on a random track rather than the first one — starting a shuffle
+  /// on the same song every time does not feel shuffled.
+  Future<void> shufflePlay(
+    List<Track> tracks, {
+    required PlaybackSource source,
+  }) async {
+    if (tracks.isEmpty) return;
+    await setPlaybackMode(_handler.mode.copyWith(shuffle: true));
+    await playAll(
+      tracks,
+      source: source,
+      index: _random.nextInt(tracks.length),
+    );
+  }
+
+  /// Applies [mode] to the player and remembers it for the next launch.
+  Future<void> setPlaybackMode(PlaybackMode mode) async {
+    await _handler.setPlaybackMode(mode);
+    await _db.writeState(AppDatabase.playbackModeStateKey, mode.encode());
+  }
+
+  Future<void> toggleShuffle() =>
+      setPlaybackMode(_handler.mode.copyWith(shuffle: !_handler.mode.shuffle));
+
+  /// Steps the repeat setting: off → all → one → off.
+  Future<void> cycleRepeat() => setPlaybackMode(
+    _handler.mode.copyWith(repeat: _handler.mode.repeat.next),
+  );
+
+  /// Re-applies the shuffle/repeat choice saved by [setPlaybackMode].
+  ///
+  /// Called once at launch. Silently leaves the defaults in place when nothing
+  /// was saved, so a first run — or a value an older build wrote — is fine.
+  Future<void> restorePlaybackMode() async {
+    final mode = PlaybackMode.decode(
+      await _db.readState(AppDatabase.playbackModeStateKey),
+    );
+    if (mode == null) return;
+    await _handler.setPlaybackMode(mode);
   }
 
   Future<void> togglePlayPause() async {

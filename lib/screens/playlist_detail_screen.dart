@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../models/player_source.dart';
 import '../models/playlist.dart';
+import '../models/track.dart';
 import '../providers/playback_providers.dart';
 import '../providers/playlist_providers.dart';
 import '../widgets/add_to_playlist_sheet.dart';
@@ -124,6 +125,15 @@ class _EntryList extends ConsumerWidget {
         if (File(entry.track.path).existsSync()) entry.track,
     ];
 
+    return Column(
+      children: [
+        _PlaybackBar(playlistId: playlistId, playable: playable),
+        Expanded(child: _buildList(ref, playable)),
+      ],
+    );
+  }
+
+  Widget _buildList(WidgetRef ref, List<Track> playable) {
     return ReorderableListView.builder(
       padding: const EdgeInsets.fromLTRB(12, 4, 12, 16),
       itemCount: entries.length,
@@ -184,6 +194,51 @@ class _EntryList extends ConsumerWidget {
           ),
         );
       },
+    );
+  }
+}
+
+/// "Play in order" and "Shuffle" for the whole playlist.
+///
+/// Both start the playlist from scratch: Play keeps the listed order and turns
+/// shuffle off, Shuffle turns it on and re-rolls the order.
+class _PlaybackBar extends ConsumerWidget {
+  const _PlaybackBar({required this.playlistId, required this.playable});
+
+  final int playlistId;
+  final List<Track> playable;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final enabled = playable.isNotEmpty;
+    final controller = ref.read(playbackControllerProvider);
+    final source = PlaylistSource(playlistId);
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 4, 12, 12),
+      child: Row(
+        children: [
+          Expanded(
+            child: FilledButton.icon(
+              onPressed: enabled
+                  ? () => controller.playInOrder(playable, source: source)
+                  : null,
+              icon: const Icon(Icons.play_arrow_rounded),
+              label: const Text('Play'),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: OutlinedButton.icon(
+              onPressed: enabled
+                  ? () => controller.shufflePlay(playable, source: source)
+                  : null,
+              icon: const Icon(Icons.shuffle_rounded),
+              label: const Text('Shuffle'),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
